@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>五大類故事｜Google 登入測試</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f7f5f1;color:#222;font-family:system-ui,'Noto Sans TC',sans-serif;padding:24px}.card{background:white;max-width:560px;margin:8vh auto;padding:32px;border:1px solid #e6e1d9;border-radius:18px;box-shadow:0 10px 35px #0000000a}h1{font-size:27px;margin:0 0 12px}p{line-height:1.65}button{cursor:pointer;background:#be2530;color:white;border:0;border-radius:12px;padding:13px 20px;font-size:17px;font-weight:700;margin:8px 8px 8px 0}button:disabled{opacity:.5;cursor:not-allowed}.secondary{background:#292929}.uid{padding:12px;background:#f4f4f4;border-radius:9px;overflow-wrap:anywhere;font-family:ui-monospace,Consolas,monospace}#status{font-weight:bold}small{color:#666}
+</style>
+</head><body><main class="card"><h1>五大類故事｜登入測試</h1>
+<p>這頁只測試 Firebase Google 登入、顯示使用者 UID，<strong>不會修改資料庫或正式網站</strong>。</p>
+<p id="status" role="status">正在確認登入狀態……</p>
+<div id="info" hidden><p>帳號：<span id="email"></span></p><p>使用者 UID：</p><div id="uid" class="uid"></div><button id="copy" class="secondary">複製 UID</button></div>
+<button id="login" disabled>使用 Google 登入</button><button id="logout" class="secondary" hidden>登出</button>
+<p id="error" style="color:#ad1420;overflow-wrap:anywhere" role="alert"></p>
+<small>請透過 https://bobayhsu.github.io/fivestory/login-test.html 開啟；不要在電腦上直接雙擊 HTML 檔。</small>
+</main>
+<script type="module">
+import {initializeApp} from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-app.js';
+import {getAuth,GoogleAuthProvider,signInWithPopup,onAuthStateChanged,signOut} from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-auth.js';
+const firebaseConfig={apiKey:'AIzaSyCOZlYL_Sp2Kg5UCP4SenvmrZSVC2TnI98',authDomain:'fivestory-ae806.firebaseapp.com',databaseURL:'https://fivestory-ae806-default-rtdb.asia-southeast1.firebasedatabase.app',projectId:'fivestory-ae806',storageBucket:'fivestory-ae806.firebasestorage.app',messagingSenderId:'280259556951',appId:'1:280259556951:web:428071f75f5e10866d9512'};
+const $=id=>document.getElementById(id),auth=getAuth(initializeApp(firebaseConfig));
+$('login').disabled=false;
+onAuthStateChanged(auth,user=>{ $('login').hidden=!!user;$('logout').hidden=!user;$('info').hidden=!user;$('status').textContent=user?'登入成功！請複製以下 UID。':'尚未登入';$('error').textContent='';if(user){$('email').textContent=user.email||'(未提供)';$('uid').textContent=user.uid;}},err=>{$('status').textContent='確認登入狀態失敗';$('error').textContent=err.message;});
+$('login').addEventListener('click',async()=>{ $('error').textContent='';$('login').disabled=true;try{await signInWithPopup(auth,new GoogleAuthProvider());}catch(e){$('error').textContent='登入失敗：'+e.message;}finally{$('login').disabled=false;}});
+$('logout').addEventListener('click',async()=>{try{await signOut(auth);}catch(e){$('error').textContent=e.message;}});
+$('copy').addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('uid').textContent);$('copy').textContent='已複製';}catch(e){$('error').textContent='複製失敗，請長按 UID 手動複製';}});
+</script></body></html>
