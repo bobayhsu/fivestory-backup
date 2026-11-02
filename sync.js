@@ -19,7 +19,7 @@ catch(e){badge.textContent='Firebase 設定錯誤';console.error(e);return;}
  beginSync();
 function beginSync(){
 const ref=db.ref('rooms/'+room+'/screen');
-const nodeId=(crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random());
+const nodeId=(typeof crypto!=='undefined' && typeof crypto.randomUUID==='function') ? crypto.randomUUID() : String(Date.now())+Math.random();
 const slideEls=[...document.querySelectorAll('#stage > .slide')];
 const overlayIds=['formula','ov-map','ov-star','ov-bird','ov-girl','endPage'];
 let connected=false, applying=false, latest='', latestRemote='', pending=null, initial=true;
