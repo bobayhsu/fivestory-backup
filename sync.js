@@ -5,7 +5,7 @@ if(!query.has('sync') || window.__TIMER) return;
 const room=query.get('sync')||'demo';
 // Avoid sending invalid database path characters
 if(!/^[a-zA-Z0-9_-]{4,60}$/.test(room)){alert('同步房間代碼須為 4–60 位英數字、底線或連字號');return;}
-const badge=document.createElement('div');badge.id='syncState';badge.textContent='同步：準備中';document.body.appendChild(badge);
+const badge=document.getElementById('syncState')||document.createElement('div');badge.id='syncState';badge.textContent='同步：準備中';if(!badge.isConnected)document.body.appendChild(badge);
 const cfg=window.FIVESTORY_FIREBASE_CONFIG;
 if(!cfg || !cfg.apiKey || cfg.apiKey==='請填入'||!cfg.databaseURL||cfg.databaseURL.includes('請填入')){
  badge.textContent='同步尚未設定 Firebase（閱讀操作說明）'; return;
