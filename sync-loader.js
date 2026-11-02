@@ -26,7 +26,7 @@
       }
       badge.textContent='同步：啟動連線…';
       // sync.js owns the connection UI once executed.
-      await load('sync.js?v=syncfix2');
+      await load('sync.js?v=inline9');
       if (badge.textContent==='同步：啟動連線…') badge.textContent='同步程式未啟動，請檢查 sync.js';
     } catch (err) { badge.textContent='同步載入失敗：'+err.message; console.error(err); }
   });

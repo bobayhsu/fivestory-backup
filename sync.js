@@ -22,59 +22,41 @@ const ref=db.ref('rooms/'+room+'/screen');
 const nodeId=(typeof crypto!=='undefined' && typeof crypto.randomUUID==='function')?crypto.randomUUID():String(Date.now())+Math.random();
 const slideEls=[...document.querySelectorAll('#stage > .slide')];
 const overlayIds=['formula','ov-map','ov-star','ov-bird','ov-girl','endPage'];
- 
-const videoTargets = {
-  'https://bobayhsu.github.io/allbobay/': '影片資源',
-  'https://www.youtube.com/watch?v=CSuwxPxaJSQ': '看影片'
+
+// Two external video links are shown inside the same synchronized page.
+// External websites are not controllable by the Firebase screen state.
+const externalTargets={
+ 'https://bobayhsu.github.io/allbobay/':{title:'影片資源',frame:'https://bobayhsu.github.io/allbobay/'},
+ 'https://www.youtube.com/watch?v=CSuwxPxaJSQ':{title:'看影片',frame:'https://www.youtube-nocookie.com/embed/CSuwxPxaJSQ?rel=0'}
 };
-let videoPage = '';
-
-const videoLayer = document.createElement('div');
-videoLayer.style.cssText =
-  'position:fixed;inset:0;z-index:2147483000;background:#111;display:none;flex-direction:column;color:white';
-
-videoLayer.innerHTML =
-  '<div style="padding:12px;background:#222;display:flex;justify-content:space-between">' +
-  '<strong id="videoTitle">影片</strong>' +
-  '<button id="videoClose" style="padding:8px 16px">返回故事</button></div>' +
-  '<iframe id="videoFrame" style="width:100%;flex:1;border:0" allowfullscreen allow="autoplay;encrypted-media;picture-in-picture"></iframe>';
-
-document.body.appendChild(videoLayer);
-
-function showVideo(url) {
-  if (url === videoPage) return;
-  videoPage = url || '';
-  videoLayer.style.display = videoPage ? 'flex' : 'none';
-  const frame = document.getElementById('videoFrame');
-  if (!videoPage) {
-    frame.removeAttribute('src');
-    return;
-  }
-  document.getElementById('videoTitle').textContent = videoTargets[videoPage] || '影片';
-  frame.src = videoPage.includes('youtube.com/watch?v=')
-    ? 'https://www.youtube-nocookie.com/embed/' + new URL(videoPage).searchParams.get('v')
-    : videoPage;
+let externalPage='';
+const layer=document.createElement('div');
+layer.id='fivestorySyncedExternal';
+layer.style.cssText='position:fixed;inset:0;z-index:2147483000;background:#101010;display:none;flex-direction:column;color:#fff;font-family:sans-serif;';
+layer.innerHTML='<div style="display:flex;gap:12px;align-items:center;padding:10px 12px;background:#171717;min-height:46px"><strong id="syncExternalTitle" style="flex:1">影片</strong><a id="syncExternalOpen" style="color:#fff;text-decoration:underline;font-size:14px" href="#" target="_blank" rel="noopener noreferrer">另開網站</a><button id="syncExternalClose" type="button" style="background:#fff;color:#111;border:0;border-radius:9px;padding:9px 14px;font-weight:bold;cursor:pointer">返回故事</button></div><iframe id="syncExternalFrame" title="同步影片視窗" style="flex:1;width:100%;min-height:0;border:0;background:#fff" allow="accelerometer;autoplay;encrypted-media;gyroscope;picture-in-picture;fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>';
+document.body.appendChild(layer);
+const frame=layer.querySelector('#syncExternalFrame');
+function showExternal(url){
+  if(url===externalPage)return;
+  externalPage=url||'';
+  layer.style.display=externalPage?'flex':'none';
+  if(externalPage){
+    const item=externalTargets[externalPage];
+    layer.querySelector('#syncExternalTitle').textContent=item.title;
+    layer.querySelector('#syncExternalOpen').href=externalPage;
+    frame.src=item.frame;
+  }else{frame.removeAttribute('src');}
 }
+layer.querySelector('#syncExternalClose').addEventListener('click',()=>showExternal(''));
+// Only the two precise links are intercepted; normal pages retain normal behavior.
+document.addEventListener('click',e=>{
+ const a=e.target.closest?.('a[href]');
+ if(!a)return;
+ const key=a.dataset.syncVideo==='resources'?'https://bobayhsu.github.io/allbobay/':a.dataset.syncVideo==='youtube'?'https://www.youtube.com/watch?v=CSuwxPxaJSQ':a.href;
+ if(!Object.prototype.hasOwnProperty.call(externalTargets,key))return;
+ e.preventDefault();e.stopImmediatePropagation();showExternal(key);
+},true);
 
-document.getElementById('videoClose').onclick = () => showVideo('');
-
-document.addEventListener('click', e => {
-  const a = e.target.closest?.('a[href]');
-  if (!a) return;
-
-  let target = '';
-
-  if (a.href.includes('bobayhsu.github.io/allbobay')) {
-    target = 'https://bobayhsu.github.io/allbobay/';
-  } else if (a.href.includes('youtube.com/watch?v=CSuwxPxaJSQ')) {
-    target = 'https://www.youtube.com/watch?v=CSuwxPxaJSQ';
-  }
-  if (!target) return;
-
-  e.preventDefault();
-  e.stopPropagation();
-  showVideo(target);
-}, true);
 let connected=false, applying=false, latest='', latestRemote='', pending=null, initial=true;
 let timerRevision=0, lastTimerFingerprint='';
 const deepCopy=o=>o?JSON.parse(JSON.stringify(o)):null;
@@ -95,7 +77,7 @@ function capture(){
   annotations:[...document.querySelectorAll('.fwrap')].map((el,i)=>el.classList.contains('annOn')?i:null).filter(v=>v!==null),
   practice:[...document.querySelectorAll('#pv .drPage')].map((el,i)=>el.classList.contains('open')?i:null).filter(v=>v!==null),
   drill:document.getElementById('drill')?.classList.contains('open')||false,
-externalPage:videoPage,
+  externalPage:externalPage,
   timerMode:document.body.classList.contains('tmode'),
   timers:stableTimers()
  };
@@ -117,11 +99,11 @@ function apply(s){
    document.querySelectorAll('.fwrap').forEach((el,i)=>el.classList.toggle('annOn',(s.annotations||[]).includes(i)));
    document.querySelectorAll('#pv .drPage').forEach((el,i)=>el.classList.toggle('open',(s.practice||[]).includes(i)));
    document.getElementById('drill')?.classList.toggle('open',!!s.drill);
+   showExternal(externalTargets[s.externalPage]?s.externalPage:'');
    // Recreate timer inline mode without opening an extra browser tab.
    if(s.timerMode && !document.body.classList.contains('tmode')) window.__openTimer?.();
    if(!s.timerMode && document.body.classList.contains('tmode')){document.body.classList.remove('tmode');document.getElementById('pv')?.classList.remove('open');document.querySelectorAll('[data-tmh]').forEach(el=>{el.style.display=el.dataset.tmh||'';delete el.dataset.tmh;});}
-    showVideo(s.externalPage || '');
-  window.__pvTimerSync?.apply(s.timers?.pv);
+   window.__pvTimerSync?.apply(s.timers?.pv);
    window.__fmTimerSync?.apply(s.timers?.fm);
    history.replaceState(null,'','#'+(s.slide+1));
    latest=stable(capture());
