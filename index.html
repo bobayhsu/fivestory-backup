@@ -1332,8 +1332,5 @@ document.querySelectorAll('#stage *').forEach(e=>{if(e.closest('#reader'))return
 const run=()=>{try{fix();}catch(e){}};if(document.fonts&&document.fonts.ready)document.fonts.ready.then(run);else addEventListener('load',run);})();
 </script>
 
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
-<script src="sync-config.js"></script>
-<script src="sync.js"></script>
+<script src="sync-loader.js?v=syncfix2"></script>
 </body></html>
