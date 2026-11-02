@@ -1318,10 +1318,9 @@ document.querySelectorAll('#stage *').forEach(e=>{if(e.closest('#reader'))return
 const run=()=>{try{fix();}catch(e){}};if(document.fonts&&document.fonts.ready)document.fonts.ready.then(run);else addEventListener('load',run);})();
 </script>
 
-<!-- 同步功能：主網頁執行完畢後載入，僅在網址包含 ?sync=class1 時啟動 -->
+<!-- 公開同步功能：無須 Google 登入；僅在網址包含 ?sync=class1 時啟動 -->
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="sync-config.js"></script>
 <script src="sync.js"></script>
 </body></html>

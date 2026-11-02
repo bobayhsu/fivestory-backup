@@ -14,23 +14,9 @@ if(typeof firebase==='undefined'){badge.textContent='Firebase 程式未載入，
 let db;
 try{if(!firebase.apps.length)firebase.initializeApp(cfg);db=firebase.database();}
 catch(e){badge.textContent='Firebase 設定錯誤';console.error(e);return;}
-const auth=firebase.auth();
-const allowedUid='SdAwYAot8XgXLqcSLjY7H8H7s1A3';
-const login=document.createElement('button');
-login.textContent='使用 Google 登入同步';
-Object.assign(login.style,{position:'fixed',zIndex:'100000',bottom:'52px',left:'8px',background:'#fff',color:'#111',border:'2px solid #c41f27',borderRadius:'12px',padding:'12px',fontSize:'16px',cursor:'pointer'});
-document.body.appendChild(login);
-login.addEventListener('click',async()=>{
- try{await auth.signInWithPopup(new firebase.auth.GoogleAuthProvider());}
- catch(err){badge.textContent='登入失敗：'+err.code;console.error(err);}
-});
-let started=false;
-auth.onAuthStateChanged(user=>{
- if(!user){badge.textContent='請先使用 Google 登入';login.style.display='block';return;}
- if(user.uid!==allowedUid){badge.textContent='此帳號未獲授權控制同步';login.style.display='block';auth.signOut();return;}
- login.style.display='none';badge.textContent='已登入，正在連接同步';
- if(!started){started=true;beginSync();}
-});
+// Public room: no Google sign-in. Anyone with the URL can control the shared screen.
+// The database rules must explicitly permit reads/writes to this room.
+ beginSync();
 function beginSync(){
 const ref=db.ref('rooms/'+room+'/screen');
 const nodeId=(crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random());
