@@ -1,125 +1,74 @@
-/* FiveStory video bridge v4 — keep YouTube navigation in the synchronized player. */
+/* FiveStory YouTube bridge V5 — explicit allbobay postMessage and Firebase player control. */
 (()=>{
 'use strict';
-const params=new URLSearchParams(location.search);
-if(!params.has('sync') || !window.firebase?.database)return;
-const room=params.get('sync')||'demo';
-if(!/^[a-zA-Z0-9_-]{4,60}$/.test(room))return;
-const resourceURL='https://bobayhsu.github.io/allbobay/';
+const qp=new URLSearchParams(location.search);
+if(!qp.has('sync')||!window.firebase?.database)return;
+const room=qp.get('sync')||'demo';
+if(!/^[A-Za-z0-9_-]{4,60}$/.test(room))return;
 const frame=document.getElementById('syncExternalFrame');
 const layer=document.getElementById('fivestorySyncedExternal');
 if(!frame||!layer)return;
-const ref=firebase.database().ref('rooms/'+room+'/screen/videoCommand');
-const sender='video-'+Date.now()+'-'+Math.random().toString(36).slice(2);
-const start=Date.now();
-let last='', remote=false, watched=null, player=null, ready=false, currentID='', queued=null, pendingClicks=[];
-let ytPromise=null, generation=0;
-const resourceActive=()=>layer.style.display!=='none' && (frame.getAttribute('src')||'').startsWith(resourceURL);
-const panel=document.createElement('div');
-panel.id='fivestoryVideoPanel';
-panel.style.cssText='position:fixed;inset:0;z-index:2147483200;background:#0b0e16;color:white;display:none;flex-direction:column;font-family:system-ui,"Microsoft JhengHei",sans-serif;';
-panel.innerHTML=`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 12px;background:#1b2030"><strong id="fsvTitle" style="flex:1;min-width:140px;font-size:15px">影片</strong><button type="button" id="fsvPlay">▶ 播放</button><button type="button" id="fsvPause">Ⅱ 暫停</button><button type="button" id="fsvBack">返回影片列表</button></div><div id="fsvPlayer" style="flex:1;min-height:120px;width:100%;display:grid;place-items:center"></div><div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:#1b2030;flex-wrap:wrap"><button type="button" id="fsvPrev">−10 秒</button><input id="fsvSeek" aria-label="影片進度" type="range" min="0" max="1000" value="0" style="flex:1;min-width:120px"><button type="button" id="fsvNext">+10 秒</button><button type="button" id="fsvMute">開啟聲音</button><span id="fsvStatus" style="font-size:12px;color:#cbd5e1">若桌機擋住自動播放，請在桌機按一次播放。</span></div>`;
-document.body.appendChild(panel);
-panel.querySelectorAll('button').forEach(b=>{b.style.cssText='border:0;border-radius:8px;padding:10px 12px;cursor:pointer;background:#fff;color:#151922;font-weight:700'});
-const title=panel.querySelector('#fsvTitle'),slot=panel.querySelector('#fsvPlayer'),slider=panel.querySelector('#fsvSeek'),status=panel.querySelector('#fsvStatus'),muteBtn=panel.querySelector('#fsvMute');
+const resourceURL='https://bobayhsu.github.io/allbobay/';
+const actionRef=firebase.database().ref('rooms/'+room+'/screen/videoCommand');
+const self='v5-'+Date.now()+'-'+Math.random().toString(36).slice(2);
+const began=Date.now();
+let last='',remote=false,documentWatched=null,player=null,ready=false,playingID='',queued=null,generation=0,ytPromise=null,ignoreSelectUntil=0;
+const active=()=>layer.style.display!=='none'&&(frame.getAttribute('src')||'').startsWith(resourceURL);
 function youtubeID(raw){
- try{
-  const u=new URL(raw,resourceURL);const host=u.hostname.toLowerCase();
-  if(host==='youtu.be')return /^[-\w]{11}$/.test(u.pathname.slice(1))?u.pathname.slice(1):null;
-  if(['youtube.com','www.youtube.com','m.youtube.com','www.youtube-nocookie.com','music.youtube.com'].includes(host)){
-   const id=u.searchParams.get('v') || (/^\/(?:embed|shorts|live)\/([-\w]{11})/.exec(u.pathname)||[])[1];
-   return /^[-\w]{11}$/.test(id||'')?id:null;
+ try{const u=new URL(raw);const host=u.hostname.toLowerCase();
+  if(host==='youtu.be'){const s=u.pathname.split('/')[1];return /^[\w-]{11}$/.test(s)?s:null;}
+  if(['youtube.com','www.youtube.com','m.youtube.com','music.youtube.com','www.youtube-nocookie.com'].includes(host)){
+   const s=u.searchParams.get('v')||(/^\/(?:embed|shorts|live)\/([\w-]{11})/.exec(u.pathname)||[])[1];
+   return /^[\w-]{11}$/.test(s||'')?s:null;
   }
  }catch(_){}return null;
 }
-function transmit(data){
- if(remote)return;
- ref.set({id:sender+'-'+Date.now()+'-'+Math.random().toString(36).slice(2),sender,at:firebase.database.ServerValue.TIMESTAMP,...data}).catch(e=>{console.error('影片同步寫入失敗',e);status.textContent='影片同步寫入失敗：請檢查 Firebase 權限';});
+const panel=document.createElement('div');panel.id='fivestoryVideoPanel';
+panel.style.cssText='position:fixed;inset:0;z-index:2147483200;display:none;flex-direction:column;background:#0b1020;color:white;font:15px system-ui,"Microsoft JhengHei",sans-serif;';
+panel.innerHTML=`<style>
+#fivestoryVideoPanel .fsv-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#1b2540;padding:10px max(10px,env(safe-area-inset-left))}
+#fivestoryVideoPanel button{border:0;background:#fff;color:#14213d;border-radius:10px;padding:11px 13px;min-height:44px;font:700 15px system-ui;cursor:pointer}
+#fivestoryVideoPanel #fsvSeek{flex:1;min-width:100px;accent-color:#e8c97a}
+#fivestoryVideoPanel #fsvPlayer{flex:1;min-height:100px;background:#080c15;display:grid;place-items:center}
+#fivestoryVideoPanel #fsvPlayer iframe{max-width:100%}
+#fivestoryVideoPanel .fsv-status{font-size:12px;line-height:1.5;color:#ddd;padding:6px 12px;background:#101b32}
+@media(max-width:600px){#fivestoryVideoPanel .fsv-bar{gap:6px;padding:7px}#fivestoryVideoPanel button{font-size:13px;padding:8px 10px}#fivestoryVideoPanel #fsvTitle{width:100%;flex:1 1 100%!important}}
+</style><div class="fsv-bar"><strong id="fsvTitle" style="flex:1;min-width:110px">同步影片</strong><button id="fsvPlay">▶ 播放</button><button id="fsvPause">Ⅱ 暫停</button><button id="fsvBack">返回列表</button></div><div id="fsvPlayer"></div><div class="fsv-bar"><button id="fsvPrev">−10 秒</button><input id="fsvSeek" type="range" min="0" max="1000" value="0" aria-label="影片進度"><button id="fsvNext">+10 秒</button><button id="fsvMute">開啟聲音</button></div><div id="fsvStatus" class="fsv-status">選片後會同步開啟影片；部分手機與瀏覽器可能要求手動按播放。</div>`;
+document.body.appendChild(panel);
+const slot=panel.querySelector('#fsvPlayer'),title=panel.querySelector('#fsvTitle'),seekBar=panel.querySelector('#fsvSeek'),status=panel.querySelector('#fsvStatus'),muteButton=panel.querySelector('#fsvMute');
+function transmit(data){if(remote)return;actionRef.set({id:self+'-'+Date.now()+'-'+Math.random().toString(36).slice(2),sender:self,at:firebase.database.ServerValue.TIMESTAMP,...data}).catch(e=>{status.textContent='同步寫入失敗，請檢查 Firebase 權限';console.error(e)});}
+function api(){if(window.YT?.Player)return Promise.resolve(window.YT);if(ytPromise)return ytPromise;ytPromise=new Promise((resolve,reject)=>{const prior=window.onYouTubeIframeAPIReady;window.onYouTubeIframeAPIReady=()=>{try{prior?.()}catch(_){}resolve(window.YT)};const s=document.createElement('script');s.src='https://www.youtube.com/iframe_api';s.onerror=()=>reject(Error('YouTube API 載入失敗'));document.head.append(s)});return ytPromise;}
+function playback(op){if(!ready||!player){queued=op;return;}try{if(op==='play')player.playVideo();if(op==='pause')player.pauseVideo()}catch(e){console.warn(e)}}
+function jump(seconds){if(!Number.isFinite(seconds))return;try{if(ready&&player)player.seekTo(Math.max(0,seconds),true)}catch(e){console.warn(e)}}
+function close(){generation++;panel.style.display='none';playingID='';ready=false;queued=null;try{player?.destroy()}catch(_){}player=null;slot.replaceChildren()}
+function show(id,text){
+ if(!/^[\w-]{11}$/.test(id||''))return;
+ const token=++generation;playingID=id;title.textContent=text||'YouTube 影片';panel.style.display='flex';status.textContent='正在載入影片…';seekBar.value='0';queued='play';ready=false;
+ try{player?.destroy()}catch(_){}player=null;slot.replaceChildren();const mount=document.createElement('div');mount.id='fsvMount';slot.append(mount);
+ api().then(YT=>{if(token!==generation||panel.style.display==='none')return;
+  player=new YT.Player(mount,{width:'100%',height:'100%',videoId:id,playerVars:{enablejsapi:1,playsinline:1,rel:0,origin:location.origin,autoplay:1,mute:1},events:{onReady:()=>{if(token!==generation)return;ready=true;try{player.mute()}catch(_){}muteButton.textContent='開啟聲音';status.textContent='已載入同步播放器。若未自動播放，請點「播放」。';const p=queued;queued=null;if(p)playback(p)},onError:e=>{status.textContent='此影片可能禁止嵌入播放（YouTube 錯誤碼 '+e.data+'）'}}});
+ }).catch(e=>{status.textContent='YouTube 播放器載入失敗';console.error(e)});
 }
-function ytAPI(){
- if(window.YT?.Player)return Promise.resolve(window.YT);
- if(ytPromise)return ytPromise;
- ytPromise=new Promise((resolve,reject)=>{
-  const prev=window.onYouTubeIframeAPIReady;
-  window.onYouTubeIframeAPIReady=()=>{try{prev?.()}catch(_){}resolve(window.YT)};
-  const s=document.createElement('script');s.src='https://www.youtube.com/iframe_api';s.onerror=()=>reject(new Error('YouTube API 無法載入'));document.head.appendChild(s);
- });return ytPromise;
-}
-function setPlayback(op){
- if(!ready||!player){queued=op;return;}
- try{if(op==='play')player.playVideo();else if(op==='pause')player.pauseVideo();}catch(e){console.warn('影片播放控制',e)}
-}
-function seek(t){if(!Number.isFinite(t))return;if(ready&&player)try{player.seekTo(Math.max(0,t),true)}catch(e){console.warn('影片跳轉',e)}}
-function showVideo(id,label){
- if(!/^[-\w]{11}$/.test(id||''))return;
- const token=++generation;currentID=id;title.textContent=label||'YouTube 影片';panel.style.display='flex';status.textContent='正在載入影片…';
- queued='play';ready=false;slider.value=0;
- if(player){try{player.destroy()}catch(_){}player=null}
- slot.replaceChildren();const mount=document.createElement('div');mount.id='fsvYouTubeMount';slot.appendChild(mount);
- ytAPI().then(YT=>{
-  if(generation!==token||panel.style.display==='none')return;
-  player=new YT.Player(mount,{width:'100%',height:'100%',videoId:id,
-   playerVars:{playsinline:1,rel:0,origin:location.origin,enablejsapi:1,autoplay:1,mute:1},
-   events:{onReady:()=>{if(generation!==token)return;ready=true;try{player.mute()}catch(_){}muteBtn.textContent='開啟聲音';status.textContent='已同步選片；若未播放，請點「播放」';if(queued){const p=queued;queued=null;setPlayback(p)}},onStateChange:e=>{if(e.data===YT.PlayerState.PLAYING)status.textContent='播放中（預設靜音）';},onError:e=>{status.textContent='影片無法嵌入播放（錯誤碼 '+e.data+'）';console.warn('YouTube iframe',e.data)}}});
- }).catch(e=>{status.textContent='無法載入 YouTube 播放器';console.error(e)});
-}
-function closeVideo(){
- ++generation;panel.style.display='none';currentID='';queued=null;ready=false;
- if(player){try{player.destroy()}catch(_){}player=null}slot.replaceChildren();
-}
-function play(op){setPlayback(op);transmit({kind:'playback',op})}
-panel.querySelector('#fsvPlay').onclick=()=>play('play');
-panel.querySelector('#fsvPause').onclick=()=>play('pause');
-panel.querySelector('#fsvBack').onclick=()=>{closeVideo();transmit({kind:'close'})};
-function delta(n){let t=0;try{t=player?.getCurrentTime()||0}catch(_){}const sec=Math.max(0,t+n);seek(sec);transmit({kind:'seek',seconds:sec})}
-panel.querySelector('#fsvPrev').onclick=()=>delta(-10);
-panel.querySelector('#fsvNext').onclick=()=>delta(10);
-slider.addEventListener('change',()=>{let dur=0;try{dur=player?.getDuration()||0}catch(_){}if(dur>0){const sec=dur*Number(slider.value)/1000;seek(sec);transmit({kind:'seek',seconds:sec})}});
-muteBtn.onclick=()=>{if(!player||!ready)return;let m=true;try{m=player.isMuted();if(m)player.unMute();else player.mute()}catch(_){}muteBtn.textContent=m?'靜音':'開啟聲音'};
-setInterval(()=>{if(panel.style.display==='none'||!player||!ready||slider.matches(':active'))return;try{const d=player.getDuration(),t=player.getCurrentTime();if(d>0)slider.value=String(Math.max(0,Math.min(1000,Math.floor(t/d*1000))))}catch(_){}},500);
-function cssPath(el){
- if(el.id)return '#'+CSS.escape(el.id);
- const p=[];while(el&&el.nodeType===1&&p.length<15){if(el.id){p.unshift('#'+CSS.escape(el.id));break}const parent=el.parentElement;if(!parent)break;const ix=Array.from(parent.children).filter(x=>x.tagName===el.tagName).indexOf(el)+1;p.unshift(el.tagName.toLowerCase()+':nth-of-type('+ix+')');el=parent}return p.join(' > ');
-}
-function getVideoTarget(target){
- const el=target?.closest?.('a[href], [data-url], [data-video-url], [data-youtube], .custom-select-item');
- if(!el)return null;
- const attr=el.getAttribute('data-url')||el.getAttribute('data-video-url')||el.getAttribute('data-youtube')||el.getAttribute('href');
- let id=youtubeID(attr||'');
- if(!id){const child=el.querySelector?.('a[href]');if(child)id=youtubeID(child.href)}
- return id?{id,title:(el.textContent||'YouTube 影片').trim().slice(0,150)}:null;
-}
-function videoClick(e){
- if(!resourceActive()||remote)return;
- const v=getVideoTarget(e.target);if(!v)return;
- e.preventDefault();e.stopImmediatePropagation();
- showVideo(v.id,v.title);transmit({kind:'select',videoID:v.id,title:v.title});
-}
-function generalClick(e){
- if(!resourceActive()||remote)return;
- if(getVideoTarget(e.target))return;
- const el=e.target.closest?.('summary,.custom-select-button,.book-hotspot,.book-close,button:not(.custom-select-item)');
- if(el)transmit({kind:'click',path:cssPath(el)});
-}
-function applyClick(path){try{const el=frame.contentDocument?.querySelector(path);if(!el)return false;remote=true;try{el.click()}finally{remote=false}return true}catch(_){return false}}
-function unbind(){if(watched){watched.removeEventListener('click',videoClick,true);watched.removeEventListener('click',generalClick,true);watched=null}}
-function bind(){
- unbind();try{const d=frame.contentDocument;if(!d?.body||!frame.contentWindow.location.href.startsWith(resourceURL))return;
-  d.addEventListener('click',videoClick,true);d.addEventListener('click',generalClick,true);watched=d;
-  if(pendingClicks.length){const old=pendingClicks.splice(0);old.forEach(p=>{if(!applyClick(p))pendingClicks.push(p)})}
- }catch(e){console.warn('無法監聽影片網站',e)}
-}
-frame.addEventListener('load',bind);
-setInterval(()=>{if(resourceActive()&&!watched)bind();if(!resourceActive()&&panel.style.display!=='none')closeVideo()},700);
-ref.on('value',snap=>{
- const cmd=snap.val();if(!cmd?.id||cmd.id===last||cmd.sender===sender)return;
- last=cmd.id;if(typeof cmd.at==='number'&&cmd.at<start-2000)return;
- remote=true;try{
-  if(cmd.kind==='select'&&/^[-\w]{11}$/.test(cmd.videoID||''))showVideo(cmd.videoID,cmd.title);
-  else if(cmd.kind==='playback'&&['play','pause'].includes(cmd.op))setPlayback(cmd.op);
-  else if(cmd.kind==='seek'&&Number.isFinite(cmd.seconds))seek(cmd.seconds);
-  else if(cmd.kind==='close')closeVideo();
-  else if(cmd.kind==='click'&&typeof cmd.path==='string'){if(!applyClick(cmd.path))pendingClicks.push(cmd.path)}
- }finally{remote=false}
-},e=>{status.textContent='影片同步讀取失敗';console.error(e)});
+function select(url,label){const id=youtubeID(url);if(!id||!active())return false;if(Date.now()<ignoreSelectUntil&&id===playingID)return true;ignoreSelectUntil=Date.now()+500;show(id,label);transmit({kind:'select',videoID:id,title:label||'YouTube 影片'});return true;}
+// allbobay V5 sends this message directly, avoiding its window.open() behavior.
+window.addEventListener('message',e=>{if(e.origin!==location.origin||e.source!==frame.contentWindow||e.data?.type!=='fivestory-video-select-v5')return;select(e.data.url,e.data.title)});
+// Legacy allbobay support: intercept clicks at capture phase before its own window.open handler.
+function onClick(e){if(!active()||remote)return;const el=e.target.closest?.('[data-url],a[href]');if(!el)return;const url=el.getAttribute('data-url')||el.getAttribute('href');if(!youtubeID(url))return;
+ e.preventDefault();e.stopImmediatePropagation();select(url,(el.textContent||'YouTube 影片').trim());}
+function unbind(){if(documentWatched){documentWatched.removeEventListener('click',onClick,true);documentWatched=null}}
+function bind(){unbind();try{const d=frame.contentDocument;if(!d?.body||!frame.contentWindow.location.href.startsWith(resourceURL))return;d.addEventListener('click',onClick,true);documentWatched=d}catch(e){console.warn('無法監控影片資源頁面',e)}}
+frame.addEventListener('load',bind);setInterval(()=>{if(active()&&!documentWatched)bind();if(!active()&&panel.style.display!=='none')close()},500);
+panel.querySelector('#fsvPlay').onclick=()=>{playback('play');transmit({kind:'playback',op:'play'})};
+panel.querySelector('#fsvPause').onclick=()=>{playback('pause');transmit({kind:'playback',op:'pause'})};
+panel.querySelector('#fsvBack').onclick=()=>{close();transmit({kind:'close'})};
+function offset(n){let now=0;try{now=player?.getCurrentTime()||0}catch(_){}const t=Math.max(0,now+n);jump(t);transmit({kind:'seek',seconds:t})}
+panel.querySelector('#fsvPrev').onclick=()=>offset(-10);panel.querySelector('#fsvNext').onclick=()=>offset(10);
+seekBar.onchange=()=>{let duration=0;try{duration=player?.getDuration()||0}catch(_){}if(duration>0){const t=duration*Number(seekBar.value)/1000;jump(t);transmit({kind:'seek',seconds:t})}};
+muteButton.onclick=()=>{if(!ready||!player)return;try{if(player.isMuted()){player.unMute();muteButton.textContent='靜音'}else{player.mute();muteButton.textContent='開啟聲音'}}catch(_){}};
+setInterval(()=>{if(panel.style.display==='none'||!ready||!player||seekBar.matches(':active'))return;try{const duration=player.getDuration();if(duration>0)seekBar.value=String(Math.max(0,Math.min(1000,Math.floor(player.getCurrentTime()/duration*1000))))}catch(_){}},600);
+actionRef.on('value',snap=>{const cmd=snap.val();if(!cmd?.id||cmd.id===last||cmd.sender===self)return;last=cmd.id;if(typeof cmd.at==='number'&&cmd.at<began-2000)return;
+ remote=true;try{if(cmd.kind==='select'&&/^[\w-]{11}$/.test(cmd.videoID||''))show(cmd.videoID,cmd.title);
+ else if(cmd.kind==='playback'&&['play','pause'].includes(cmd.op))playback(cmd.op);
+ else if(cmd.kind==='seek')jump(Number(cmd.seconds));else if(cmd.kind==='close')close()}finally{remote=false}
+},e=>{status.textContent='同步讀取失敗';console.error(e)});
 })();
