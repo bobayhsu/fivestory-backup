@@ -1,4 +1,4 @@
-/* FiveStory / Bullseye bridge, v1: synchronize actions inside same-origin iframe. */
+/* FiveStory / Bullseye bridge, v3: use the existing authorized screen path. */
 (()=>{
  'use strict';
  const q=new URLSearchParams(location.search);
@@ -9,7 +9,7 @@
  if(!frame)return;
  const url='https://bobayhsu.github.io/bullseye/';
  const db=firebase.database();
- const actionRef=db.ref('rooms/'+room+'/bullseyeAction');
+ const actionRef=db.ref('rooms/'+room+'/screen/bullseyeCommand');
  const selfId='bullseye-'+Date.now()+'-'+Math.random().toString(36).slice(2);
  let applied=false, sending=false, lastID='', queued=[], win=null, doc=null, inputTimer=null;
  const badge=document.getElementById('syncState');
