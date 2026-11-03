@@ -1,4 +1,4 @@
-/* FiveStory YouTube bridge V10 — supports the main 看影片 button and allbobay lists. */
+/* FiveStory YouTube bridge V11 — supports the main 看影片 button and allbobay lists. */
 (()=>{
 'use strict';
 const qp=new URLSearchParams(location.search);
@@ -10,6 +10,7 @@ const layer=document.getElementById('fivestorySyncedExternal');
 if(!frame||!layer)return;
 const resourceURL='https://bobayhsu.github.io/allbobay/';
 const actionRef=firebase.database().ref('rooms/'+room+'/screen/videoCommand');
+const timelineRef=firebase.database().ref('rooms/'+room+'/screen/videoTimeline');
 const self='v5-'+Date.now()+'-'+Math.random().toString(36).slice(2);
 const began=Date.now();
 let last='',remote=false,documentWatched=null,player=null,ready=false,playingID='',queued=null,generation=0,ytPromise=null,ignoreSelectUntil=0;
@@ -22,6 +23,41 @@ const directActive=()=>layer.style.display!=='none'&&(frame.getAttribute('src')|
 let directHandled=false;
 // Main page video has no external iframe; keep its controls open on mobile.
 let standaloneDirect=false;
+// Only the device that last used a custom player control publishes the clock.
+// This prevents the two YouTube players from pushing each other back and forth.
+let clockOwner=false, latestClock=null, serverOffset=0, lastClockReceived='', lastClockSent=0, clockBusy=false;
+firebase.database().ref('.info/serverTimeOffset').on('value',s=>{serverOffset=Number(s.val())||0});
+const serverNow=()=>Date.now()+serverOffset;
+function currentSeconds(){try{return ready&&player?Number(player.getCurrentTime())||0:0}catch(_){return 0}}
+function isPlaying(){try{return ready&&player&&player.getPlayerState()===1}catch(_){return false}}
+function becomeClockOwner(){clockOwner=true;latestClock=null;}
+function publishClock(force=false){
+ if(!clockOwner||!ready||!player||!playingID||panel.style.display==='none'||clockBusy)return;
+ if(!force&&Date.now()-lastClockSent<1200)return;
+ lastClockSent=Date.now();clockBusy=true;
+ const packet={sender:self,nonce:self+'-'+Date.now(),videoID:playingID,seconds:currentSeconds(),playing:isPlaying(),at:firebase.database.ServerValue.TIMESTAMP};
+ timelineRef.set(packet).catch(e=>console.warn('影片時間同步寫入失敗',e)).finally(()=>clockBusy=false);
+}
+function followClock(c){
+ if(!c||c.sender===self||!/^[-\w]{11}$/.test(c.videoID||'')||!Number.isFinite(c.seconds)||typeof c.at!=='number')return;
+ // Reject stale sessions, and don't jump based on very old data.
+ const age=serverNow()-c.at;
+ if(age<-2000||age>8000)return;
+ if(clockOwner)return;
+ latestClock=c;
+ if(!ready||!player||panel.style.display==='none'||playingID!==c.videoID)return;
+ const expected=Math.max(0,c.seconds+(c.playing?Math.max(0,age)/1000:0));
+ const error=Math.abs(currentSeconds()-expected);
+ // Ignore tiny differences to avoid constant YouTube buffering/seek loops.
+ if(error>1.35)jump(expected);
+ const actual=isPlaying();
+ if(c.playing&&!actual)playback('play');
+ else if(!c.playing&&actual)playback('pause');
+ status.textContent='進度同步中（相差 '+error.toFixed(1)+' 秒）';
+}
+timelineRef.on('value',snap=>{const c=snap.val();if(!c||c.nonce===lastClockReceived)return;lastClockReceived=c.nonce||'';followClock(c)},e=>console.error('影片時間同步讀取失敗',e));
+setInterval(()=>{if(clockOwner)publishClock();else if(latestClock)followClock(latestClock)},1300);
+
 
 function youtubeID(raw){
  try{const u=new URL(raw);const host=u.hostname.toLowerCase();
@@ -49,16 +85,17 @@ function transmit(data){if(remote)return;actionRef.set({id:self+'-'+Date.now()+'
 function api(){if(window.YT?.Player)return Promise.resolve(window.YT);if(ytPromise)return ytPromise;ytPromise=new Promise((resolve,reject)=>{const prior=window.onYouTubeIframeAPIReady;window.onYouTubeIframeAPIReady=()=>{try{prior?.()}catch(_){}resolve(window.YT)};const s=document.createElement('script');s.src='https://www.youtube.com/iframe_api';s.onerror=()=>reject(Error('YouTube API 載入失敗'));document.head.append(s)});return ytPromise;}
 function playback(op){if(!ready||!player){queued=op;return;}try{if(op==='play')player.playVideo();if(op==='pause')player.pauseVideo()}catch(e){console.warn(e)}}
 function jump(seconds){if(!Number.isFinite(seconds))return;try{if(ready&&player)player.seekTo(Math.max(0,seconds),true)}catch(e){console.warn(e)}}
-function close(){standaloneDirect=false;generation++;panel.style.display='none';playingID='';ready=false;queued=null;try{player?.destroy()}catch(_){}player=null;slot.replaceChildren()}
+function close(){clockOwner=false;latestClock=null;standaloneDirect=false;generation++;panel.style.display='none';playingID='';ready=false;queued=null;try{player?.destroy()}catch(_){}player=null;slot.replaceChildren()}
 function show(id,text){
  if(!/^[\w-]{11}$/.test(id||''))return;
+ if(latestClock&&latestClock.videoID!==id)latestClock=null;
  const token=++generation;playingID=id;title.textContent=text||'YouTube 影片';panel.style.display='flex';status.textContent='正在載入影片…';seekBar.value='0';queued='play';ready=false;
  try{player?.destroy()}catch(_){}player=null;slot.replaceChildren();const mount=document.createElement('div');mount.id='fsvMount';slot.append(mount);
  api().then(YT=>{if(token!==generation||panel.style.display==='none')return;
-  player=new YT.Player(mount,{width:'100%',height:'100%',videoId:id,playerVars:{enablejsapi:1,playsinline:1,rel:0,origin:location.origin,autoplay:1,mute:1},events:{onReady:()=>{if(token!==generation)return;ready=true;try{player.mute()}catch(_){}muteButton.textContent='開啟聲音';status.textContent='已載入同步播放器。若未自動播放，請點「播放」。';const p=queued;queued=null;if(p)playback(p)},onError:e=>{status.textContent='此影片可能禁止嵌入播放（YouTube 錯誤碼 '+e.data+'）'}}});
+  player=new YT.Player(mount,{width:'100%',height:'100%',videoId:id,playerVars:{enablejsapi:1,playsinline:1,rel:0,origin:location.origin,autoplay:1,mute:1},events:{onReady:()=>{if(token!==generation)return;ready=true;try{player.mute()}catch(_){}muteButton.textContent='開啟聲音';status.textContent='已載入同步播放器。若未自動播放，請點「播放」。';const p=queued;queued=null;if(p)playback(p);if(clockOwner)setTimeout(()=>publishClock(true),350);else if(latestClock)followClock(latestClock)},onError:e=>{status.textContent='此影片可能禁止嵌入播放（YouTube 錯誤碼 '+e.data+'）'}}});
  }).catch(e=>{status.textContent='YouTube 播放器載入失敗';console.error(e)});
 }
-function select(url,label){const id=youtubeID(url);if(!id||!active())return false;standaloneDirect=false;if(Date.now()<ignoreSelectUntil&&id===playingID)return true;ignoreSelectUntil=Date.now()+500;show(id,label);transmit({kind:'select',videoID:id,title:label||'YouTube 影片'});return true;}
+function select(url,label){const id=youtubeID(url);if(!id||!active())return false;becomeClockOwner();standaloneDirect=false;if(Date.now()<ignoreSelectUntil&&id===playingID)return true;ignoreSelectUntil=Date.now()+500;show(id,label);transmit({kind:'select',videoID:id,title:label||'YouTube 影片'});return true;}
 // V9: intercept the main page's black 看影片 button at WINDOW capture phase.
 // sync.js listens at document capture phase; window receives the event first.
 // This bypasses its plain YouTube iframe and opens the synchronized controls.
@@ -70,6 +107,7 @@ window.addEventListener('click',e=>{
  e.preventDefault();
  e.stopImmediatePropagation();
  standaloneDirect=true;
+ becomeClockOwner();
  show(id,'許川川田能久大蛇精');
  transmit({kind:'select',videoID:id,title:'許川川田能久大蛇精'});
 },true);
@@ -92,22 +130,22 @@ setInterval(()=>{
  directHandled=false;
  if(!active()&&!standaloneDirect&&panel.style.display!=='none')close();
 },250);
-panel.querySelector('#fsvPlay').onclick=()=>{playback('play');transmit({kind:'playback',op:'play'})};
-panel.querySelector('#fsvPause').onclick=()=>{playback('pause');transmit({kind:'playback',op:'pause'})};
+panel.querySelector('#fsvPlay').onclick=()=>{becomeClockOwner();playback('play');transmit({kind:'playback',op:'play'});setTimeout(()=>publishClock(true),350)};
+panel.querySelector('#fsvPause').onclick=()=>{becomeClockOwner();playback('pause');transmit({kind:'playback',op:'pause'});setTimeout(()=>publishClock(true),250)};
 panel.querySelector('#fsvBack').onclick=()=>{
  const wasDirect=directActive();
  close();transmit({kind:'close'});
  // Exit the parent's external-video overlay, so the old YouTube iframe does not remain behind.
  if(wasDirect){directHandled=true;document.getElementById('syncExternalClose')?.click();}
 };
-function offset(n){let now=0;try{now=player?.getCurrentTime()||0}catch(_){}const t=Math.max(0,now+n);jump(t);transmit({kind:'seek',seconds:t})}
+function offset(n){becomeClockOwner();let now=0;try{now=player?.getCurrentTime()||0}catch(_){}const t=Math.max(0,now+n);jump(t);transmit({kind:'seek',seconds:t});setTimeout(()=>publishClock(true),400)}
 panel.querySelector('#fsvPrev').onclick=()=>offset(-10);panel.querySelector('#fsvNext').onclick=()=>offset(10);
-seekBar.onchange=()=>{let duration=0;try{duration=player?.getDuration()||0}catch(_){}if(duration>0){const t=duration*Number(seekBar.value)/1000;jump(t);transmit({kind:'seek',seconds:t})}};
+seekBar.onchange=()=>{let duration=0;try{duration=player?.getDuration()||0}catch(_){}if(duration>0){const t=duration*Number(seekBar.value)/1000;jump(t);transmit({kind:'seek',seconds:t});setTimeout(()=>publishClock(true),400)}};
 muteButton.onclick=()=>{if(!ready||!player)return;try{if(player.isMuted()){player.unMute();muteButton.textContent='靜音'}else{player.mute();muteButton.textContent='開啟聲音'}}catch(_){}};
 setInterval(()=>{if(panel.style.display==='none'||!ready||!player||seekBar.matches(':active'))return;try{const duration=player.getDuration();if(duration>0)seekBar.value=String(Math.max(0,Math.min(1000,Math.floor(player.getCurrentTime()/duration*1000))))}catch(_){}},600);
 actionRef.on('value',snap=>{const cmd=snap.val();if(!cmd?.id||cmd.id===last||cmd.sender===self)return;last=cmd.id;if(typeof cmd.at==='number'&&cmd.at<began-2000)return;
- remote=true;try{if(cmd.kind==='select'&&/^[\w-]{11}$/.test(cmd.videoID||'')){standaloneDirect=cmd.videoID===directVideoID&&!active()&&!directActive();show(cmd.videoID,cmd.title);}
- else if(cmd.kind==='playback'&&['play','pause'].includes(cmd.op))playback(cmd.op);
- else if(cmd.kind==='seek')jump(Number(cmd.seconds));else if(cmd.kind==='close'){const wasDirect=directActive();close();if(wasDirect){directHandled=true;document.getElementById('syncExternalClose')?.click()}}}finally{remote=false}
+ remote=true;try{if(cmd.kind==='select'&&/^[\w-]{11}$/.test(cmd.videoID||'')){clockOwner=false;standaloneDirect=cmd.videoID===directVideoID&&!active()&&!directActive();show(cmd.videoID,cmd.title);}
+ else if(cmd.kind==='playback'&&['play','pause'].includes(cmd.op)){clockOwner=false;playback(cmd.op)}
+ else if(cmd.kind==='seek'){clockOwner=false;jump(Number(cmd.seconds))}else if(cmd.kind==='close'){const wasDirect=directActive();close();if(wasDirect){directHandled=true;document.getElementById('syncExternalClose')?.click()}}}finally{remote=false}
 },e=>{status.textContent='同步讀取失敗';console.error(e)});
 })();
