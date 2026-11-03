@@ -1,4 +1,4 @@
-/* FiveStory sync bootstrap: explicit errors and sequential SDK loading */
+/* FiveStory sync bootstrap — version bump for video bridge v4. */
 (function () {
   'use strict';
   if (!new URLSearchParams(location.search).has('sync') || window.__TIMER) return;
@@ -27,7 +27,7 @@
       badge.textContent='同步：啟動連線…';
       await load('sync.js?v=inline9');
       await load('bullseye-sync.js?v=2');
-      await load('video-sync.js?v=1');
+      await load('video-sync.js?v=4');
       if (badge.textContent==='同步：啟動連線…') badge.textContent='同步程式未啟動，請檢查 sync.js';
     } catch (err) { badge.textContent='同步載入失敗：'+err.message; console.error(err); }
   });
