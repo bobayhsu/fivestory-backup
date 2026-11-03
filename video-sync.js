@@ -1,4 +1,4 @@
-/* FiveStory YouTube bridge V8 — supports the main 看影片 button and allbobay lists. */
+/* FiveStory YouTube bridge V9 — supports the main 看影片 button and allbobay lists. */
 (()=>{
 'use strict';
 const qp=new URLSearchParams(location.search);
@@ -57,6 +57,20 @@ function show(id,text){
  }).catch(e=>{status.textContent='YouTube 播放器載入失敗';console.error(e)});
 }
 function select(url,label){const id=youtubeID(url);if(!id||!active())return false;if(Date.now()<ignoreSelectUntil&&id===playingID)return true;ignoreSelectUntil=Date.now()+500;show(id,label);transmit({kind:'select',videoID:id,title:label||'YouTube 影片'});return true;}
+// V9: intercept the main page's black 看影片 button at WINDOW capture phase.
+// sync.js listens at document capture phase; window receives the event first.
+// This bypasses its plain YouTube iframe and opens the synchronized controls.
+window.addEventListener('click',e=>{
+ const link=e.target?.closest?.('a[data-sync-video="youtube"],a.ytBtn');
+ if(!link || !document.contains(link))return;
+ const id=youtubeID(link.href);
+ if(id!==directVideoID)return;
+ e.preventDefault();
+ e.stopImmediatePropagation();
+ show(id,'許川川田能久大蛇精');
+ transmit({kind:'select',videoID:id,title:'許川川田能久大蛇精'});
+},true);
+
 // allbobay V5 sends this message directly, avoiding its window.open() behavior.
 window.addEventListener('message',e=>{if(e.origin!==location.origin||e.source!==frame.contentWindow||e.data?.type!=='fivestory-video-select-v5')return;select(e.data.url,e.data.title)});
 // Legacy allbobay support: intercept clicks at capture phase before its own window.open handler.
