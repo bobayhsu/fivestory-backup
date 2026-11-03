@@ -1,4 +1,4 @@
-/* FiveStory YouTube bridge V5 — explicit allbobay postMessage and Firebase player control. */
+/* FiveStory YouTube bridge V8 — supports the main 看影片 button and allbobay lists. */
 (()=>{
 'use strict';
 const qp=new URLSearchParams(location.search);
@@ -14,6 +14,13 @@ const self='v5-'+Date.now()+'-'+Math.random().toString(36).slice(2);
 const began=Date.now();
 let last='',remote=false,documentWatched=null,player=null,ready=false,playingID='',queued=null,generation=0,ytPromise=null,ignoreSelectUntil=0;
 const active=()=>layer.style.display!=='none'&&(frame.getAttribute('src')||'').startsWith(resourceURL);
+// The main 「看影片」 button opens a direct YouTube embed via sync.js.
+// Its externalPage is already synchronized by the existing screen state.
+const directVideoID='CSuwxPxaJSQ';
+const directEmbedPrefix='https://www.youtube-nocookie.com/embed/'+directVideoID;
+const directActive=()=>layer.style.display!=='none'&&(frame.getAttribute('src')||'').startsWith(directEmbedPrefix);
+let directHandled=false;
+
 function youtubeID(raw){
  try{const u=new URL(raw);const host=u.hostname.toLowerCase();
   if(host==='youtu.be'){const s=u.pathname.split('/')[1];return /^[\w-]{11}$/.test(s)?s:null;}
@@ -57,10 +64,25 @@ function onClick(e){if(!active()||remote)return;const el=e.target.closest?.('[da
  e.preventDefault();e.stopImmediatePropagation();select(url,(el.textContent||'YouTube 影片').trim());}
 function unbind(){if(documentWatched){documentWatched.removeEventListener('click',onClick,true);documentWatched=null}}
 function bind(){unbind();try{const d=frame.contentDocument;if(!d?.body||!frame.contentWindow.location.href.startsWith(resourceURL))return;d.addEventListener('click',onClick,true);documentWatched=d}catch(e){console.warn('無法監控影片資源頁面',e)}}
-frame.addEventListener('load',bind);setInterval(()=>{if(active()&&!documentWatched)bind();if(!active()&&panel.style.display!=='none')close()},500);
+frame.addEventListener('load',bind);
+setInterval(()=>{
+ if(active()&&!documentWatched)bind();
+ // Show synchronized controls on both devices when sync.js opens the fixed video.
+ if(directActive()){
+  if(!directHandled){directHandled=true;show(directVideoID,'許川川田能久大蛇精');}
+  return;
+ }
+ directHandled=false;
+ if(!active()&&panel.style.display!=='none')close();
+},250);
 panel.querySelector('#fsvPlay').onclick=()=>{playback('play');transmit({kind:'playback',op:'play'})};
 panel.querySelector('#fsvPause').onclick=()=>{playback('pause');transmit({kind:'playback',op:'pause'})};
-panel.querySelector('#fsvBack').onclick=()=>{close();transmit({kind:'close'})};
+panel.querySelector('#fsvBack').onclick=()=>{
+ const wasDirect=directActive();
+ close();transmit({kind:'close'});
+ // Exit the parent's external-video overlay, so the old YouTube iframe does not remain behind.
+ if(wasDirect){directHandled=true;document.getElementById('syncExternalClose')?.click();}
+};
 function offset(n){let now=0;try{now=player?.getCurrentTime()||0}catch(_){}const t=Math.max(0,now+n);jump(t);transmit({kind:'seek',seconds:t})}
 panel.querySelector('#fsvPrev').onclick=()=>offset(-10);panel.querySelector('#fsvNext').onclick=()=>offset(10);
 seekBar.onchange=()=>{let duration=0;try{duration=player?.getDuration()||0}catch(_){}if(duration>0){const t=duration*Number(seekBar.value)/1000;jump(t);transmit({kind:'seek',seconds:t})}};
@@ -69,6 +91,6 @@ setInterval(()=>{if(panel.style.display==='none'||!ready||!player||seekBar.match
 actionRef.on('value',snap=>{const cmd=snap.val();if(!cmd?.id||cmd.id===last||cmd.sender===self)return;last=cmd.id;if(typeof cmd.at==='number'&&cmd.at<began-2000)return;
  remote=true;try{if(cmd.kind==='select'&&/^[\w-]{11}$/.test(cmd.videoID||''))show(cmd.videoID,cmd.title);
  else if(cmd.kind==='playback'&&['play','pause'].includes(cmd.op))playback(cmd.op);
- else if(cmd.kind==='seek')jump(Number(cmd.seconds));else if(cmd.kind==='close')close()}finally{remote=false}
+ else if(cmd.kind==='seek')jump(Number(cmd.seconds));else if(cmd.kind==='close'){const wasDirect=directActive();close();if(wasDirect){directHandled=true;document.getElementById('syncExternalClose')?.click()}}}finally{remote=false}
 },e=>{status.textContent='同步讀取失敗';console.error(e)});
 })();
