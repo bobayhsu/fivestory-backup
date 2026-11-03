@@ -29,7 +29,7 @@ async function showVideo(id,title){
  if(!id)return;
  videoID=id;videoTitle=title||'影片';panel.style.display='flex';titleEl.textContent=videoTitle;
  if(player){try{player.destroy();}catch(_){}player=null;}
- playerReady=false;slot.replaceChildren();
+playerReady=false;queuedPlayback='play';slot.replaceChildren();
  const mount=document.createElement('div');mount.id='fsvYouTubeMount';slot.appendChild(mount);
  try{const YT=await getYT();if(videoID!==id||panel.style.display==='none')return;
   player=new YT.Player('fsvYouTubeMount',{width:'100%',height:'100%',videoId:id,playerVars:{playsinline:1,rel:0,origin:location.origin},events:{onReady:()=>{playerReady=true;if(queuedPlayback){const p=queuedPlayback;queuedPlayback=null;setPlayback(p);}},onError:e=>console.warn('YouTube player error',e.data)}});
