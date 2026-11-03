@@ -9,7 +9,7 @@ const resourceURL='https://bobayhsu.github.io/allbobay/';
 const iframe=document.getElementById('syncExternalFrame');
 const layer=document.getElementById('fivestorySyncedExternal');
 if(!iframe||!layer)return;
-const actionRef=firebase.database().ref('rooms/'+room+'/videoAction');
+const actionRef=firebase.database().ref('rooms/'+room+'/screen/videoCommand');
 const myID='video-'+Date.now()+'-'+Math.random().toString(36).slice(2);
 const started=Date.now();
 let lastID='', remote=false, watched=null, player=null, playerReady=false, videoID='', videoTitle='', queuedPlayback=null, pendingClicks=[];
