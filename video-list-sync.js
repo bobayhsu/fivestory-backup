@@ -1,77 +1,98 @@
-/* FiveStory video resource list sync V6. Adds category/dropdown state syncing; preserves V5 player. */
+/* FiveStory video list synchronization V7.
+ * Observe actual DOM state in the allbobay iframe. Keep this separate from YouTube playback commands.
+ */
 (()=>{
-'use strict';
-const q=new URLSearchParams(location.search);
-if(!q.has('sync')||!window.firebase?.database)return;
-const room=q.get('sync')||'demo';
-if(!/^[A-Za-z0-9_-]{4,60}$/.test(room))return;
-const iframe=document.getElementById('syncExternalFrame');
-const layer=document.getElementById('fivestorySyncedExternal');
-if(!iframe||!layer)return;
-const ref=firebase.database().ref('rooms/'+room+'/screen/videoCommand');
-const self='video-list-v6-'+Date.now()+'-'+Math.random().toString(36).slice(2);
-let watched=null, applying=false,last='', pending=null;
-const active=()=>layer.style.display!=='none' && (iframe.getAttribute('src')||'').startsWith('https://bobayhsu.github.io/allbobay/');
-function send(data){
- if(applying||!active())return;
- ref.set({sender:self,id:self+'-'+Date.now()+'-'+Math.random().toString(36).slice(2),at:firebase.database.ServerValue.TIMESTAMP,kind:'listUI',...data}).catch(e=>console.error('影片列表同步失敗',e));
-}
-function onClick(e){
- if(applying||!active()||!watched)return;
- const summary=e.target.closest?.('details.card > summary');
- if(summary){
-  const d=summary.closest('details.card');
-  const n=[...watched.querySelectorAll('details.card')].indexOf(d);
-  if(n<0)return;
-  // Native details toggling completes after click; send final state, not merely a toggle.
-  setTimeout(()=>send({part:'category',index:n,opened:d.open}),0);
-  return;
+ 'use strict';
+ const q=new URLSearchParams(location.search);
+ if(!q.has('sync')||!window.firebase?.database)return;
+ const room=q.get('sync')||'demo';
+ if(!/^[A-Za-z0-9_-]{4,60}$/.test(room))return;
+ const frame=document.getElementById('syncExternalFrame');
+ const layer=document.getElementById('fivestorySyncedExternal');
+ if(!frame||!layer)return;
+ const ref=firebase.database().ref('rooms/'+room+'/screen/videoListState');
+ const baseURL='https://bobayhsu.github.io/allbobay/';
+ const self='list7-'+Date.now()+'-'+Math.random().toString(36).slice(2);
+ const began=Date.now();
+ let doc=null,observer=null,armed=false,applying=false,lastSent='',lastReceived='',queued=null,sendTimer=null,remoteRevision=0;
+ const active=()=>layer.style.display!=='none'&&(frame.getAttribute('src')||'').startsWith(baseURL);
+ const elements=()=>({cards:[...doc.querySelectorAll('details.card')], menus:[...doc.querySelectorAll('.custom-select')]});
+ function capture(){
+  if(!doc)return null;
+  const {cards,menus}=elements();
+  return {
+   cards:cards.map(d=>!!d.open),
+   menus:menus.map(m=>m.classList.contains('open')),
+   labels:menus.map(m=>m.querySelector('.custom-select-button')?.textContent||'')
+  };
  }
- const b=e.target.closest?.('.custom-select-button');
- if(b){
-  const s=b.closest('.custom-select');
-  const n=[...watched.querySelectorAll('.custom-select')].indexOf(s);
-  if(n<0)return;
-  setTimeout(()=>send({part:'dropdown',index:n,opened:s.classList.contains('open')}),30);
+ function commit(){
+  sendTimer=null;
+  if(!armed||!active()||applying||!doc)return;
+  const state=capture(), serialized=JSON.stringify(state);
+  if(serialized===lastSent)return;
+  lastSent=serialized;
+  ref.set({sender:self,at:firebase.database.ServerValue.TIMESTAMP,nonce:self+'-'+Date.now(),state})
+   .catch(e=>{console.error('影片列表同步寫入失敗：',e);lastSent='';});
  }
-}
-function unbind(){if(watched){watched.removeEventListener('click',onClick,true);watched=null}}
-function bind(){
- unbind();
- try{
-  const d=iframe.contentDocument;
-  if(!d?.body||!iframe.contentWindow.location.href.startsWith('https://bobayhsu.github.io/allbobay/'))return;
-  watched=d;d.addEventListener('click',onClick,true);
-  if(pending){const x=pending;pending=null;apply(x)}
- }catch(e){console.warn('影片列表 iframe 讀取失敗',e)}
-}
-function apply(cmd){
- if(!active()||!watched){pending=cmd;return}
- const n=cmd.index;
- if(!Number.isInteger(n)||n<0||n>200)return;
- applying=true;
- try{
-  if(cmd.part==='category'){
-   const d=watched.querySelectorAll('details.card')[n];
-   if(d&&d.open!==!!cmd.opened)d.open=!!cmd.opened;
-  } else if(cmd.part==='dropdown'){
-   const s=watched.querySelectorAll('.custom-select')[n];
-   if(s&&s.classList.contains('open')!==!!cmd.opened){
-    const btn=s.querySelector('.custom-select-button');
-    // Use the site's own click handler to preserve other menu behavior.
-    if(btn)btn.click();else s.classList.toggle('open',!!cmd.opened);
-   }
+ function schedule(){
+  if(!armed||applying||!active())return;
+  if(sendTimer)clearTimeout(sendTimer);
+  sendTimer=setTimeout(commit,90);
+ }
+ function apply(state){
+  if(!state||!Array.isArray(state.cards)||!Array.isArray(state.menus))return;
+  if(!active()||!doc){queued=state;return;}
+  applying=true;
+  try{
+   const {cards,menus}=elements();
+   cards.forEach((d,i)=>{if(typeof state.cards[i]==='boolean' && d.open!==state.cards[i])d.open=state.cards[i]});
+   menus.forEach((m,i)=>{
+    if(typeof state.menus[i]==='boolean')m.classList.toggle('open',state.menus[i]);
+    if(typeof state.labels?.[i]==='string'){
+      const button=m.querySelector('.custom-select-button');
+      if(button && button.textContent!==state.labels[i])button.textContent=state.labels[i];
+    }
+   });
+   lastSent=JSON.stringify(capture());
+  }finally{
+   // MutationObserver callbacks and native <details> toggle events may be asynchronous.
+   setTimeout(()=>{applying=false;},180);
   }
- }finally{setTimeout(()=>{applying=false},60)}
-}
-iframe.addEventListener('load',bind);
-setInterval(()=>{if(active()&&!watched)bind();if(active()&&pending&&watched){const x=pending;pending=null;apply(x)}},450);
-const started=Date.now();
-ref.on('value',snap=>{
- const cmd=snap.val();
- if(!cmd?.id||cmd.id===last||cmd.sender===self||cmd.kind!=='listUI')return;
- last=cmd.id;
- if(typeof cmd.at==='number'&&cmd.at<started-2000)return;
- apply(cmd);
-},e=>console.error('影片列表同步讀取失敗',e));
+ }
+ function unbind(){
+  if(observer){observer.disconnect();observer=null;}
+  if(doc){doc.removeEventListener('toggle',schedule,true);doc.removeEventListener('click',schedule,true);}
+  doc=null;armed=false;
+  if(sendTimer){clearTimeout(sendTimer);sendTimer=null;}
+ }
+ function bind(){
+  unbind();
+  if(!active())return;
+  try{
+   const d=frame.contentDocument;
+   if(!d?.body||!frame.contentWindow.location.href.startsWith(baseURL))return;
+   doc=d;
+   // Observe real state rather than guessing whether a click will open/close.
+   observer=new MutationObserver(mutations=>{
+    if(mutations.some(m=>m.attributeName==='open'||m.attributeName==='class'||m.type==='characterData'||m.type==='childList'))schedule();
+   });
+   observer.observe(doc.body,{subtree:true,attributes:true,attributeFilter:['open','class'],characterData:true,childList:true});
+   doc.addEventListener('toggle',schedule,true);
+   doc.addEventListener('click',schedule,true);
+   lastSent=JSON.stringify(capture());
+   armed=true;
+   if(queued){const state=queued;queued=null;apply(state);}
+   const badge=document.getElementById('syncState');if(badge)badge.title='影片列表同步 V7 已連接';
+  }catch(e){console.warn('影片列表無法連接 iframe：',e);}
+ }
+ frame.addEventListener('load',bind);
+ setInterval(()=>{if(active()&&!doc)bind();if(!active()&&doc)unbind();},500);
+ ref.on('value',snap=>{
+  const packet=snap.val();
+  if(!packet?.state || packet.sender===self || packet.nonce===lastReceived)return;
+  lastReceived=packet.nonce||'';
+  if(typeof packet.at==='number' && packet.at<began-2000)return;
+  apply(packet.state);
+ },e=>console.error('影片列表同步讀取失敗：',e));
 })();
