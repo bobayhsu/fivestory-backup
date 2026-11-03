@@ -1,4 +1,4 @@
-/* FiveStory YouTube bridge V9 — supports the main 看影片 button and allbobay lists. */
+/* FiveStory YouTube bridge V10 — supports the main 看影片 button and allbobay lists. */
 (()=>{
 'use strict';
 const qp=new URLSearchParams(location.search);
@@ -20,6 +20,8 @@ const directVideoID='CSuwxPxaJSQ';
 const directEmbedPrefix='https://www.youtube-nocookie.com/embed/'+directVideoID;
 const directActive=()=>layer.style.display!=='none'&&(frame.getAttribute('src')||'').startsWith(directEmbedPrefix);
 let directHandled=false;
+// Main page video has no external iframe; keep its controls open on mobile.
+let standaloneDirect=false;
 
 function youtubeID(raw){
  try{const u=new URL(raw);const host=u.hostname.toLowerCase();
@@ -47,7 +49,7 @@ function transmit(data){if(remote)return;actionRef.set({id:self+'-'+Date.now()+'
 function api(){if(window.YT?.Player)return Promise.resolve(window.YT);if(ytPromise)return ytPromise;ytPromise=new Promise((resolve,reject)=>{const prior=window.onYouTubeIframeAPIReady;window.onYouTubeIframeAPIReady=()=>{try{prior?.()}catch(_){}resolve(window.YT)};const s=document.createElement('script');s.src='https://www.youtube.com/iframe_api';s.onerror=()=>reject(Error('YouTube API 載入失敗'));document.head.append(s)});return ytPromise;}
 function playback(op){if(!ready||!player){queued=op;return;}try{if(op==='play')player.playVideo();if(op==='pause')player.pauseVideo()}catch(e){console.warn(e)}}
 function jump(seconds){if(!Number.isFinite(seconds))return;try{if(ready&&player)player.seekTo(Math.max(0,seconds),true)}catch(e){console.warn(e)}}
-function close(){generation++;panel.style.display='none';playingID='';ready=false;queued=null;try{player?.destroy()}catch(_){}player=null;slot.replaceChildren()}
+function close(){standaloneDirect=false;generation++;panel.style.display='none';playingID='';ready=false;queued=null;try{player?.destroy()}catch(_){}player=null;slot.replaceChildren()}
 function show(id,text){
  if(!/^[\w-]{11}$/.test(id||''))return;
  const token=++generation;playingID=id;title.textContent=text||'YouTube 影片';panel.style.display='flex';status.textContent='正在載入影片…';seekBar.value='0';queued='play';ready=false;
@@ -56,7 +58,7 @@ function show(id,text){
   player=new YT.Player(mount,{width:'100%',height:'100%',videoId:id,playerVars:{enablejsapi:1,playsinline:1,rel:0,origin:location.origin,autoplay:1,mute:1},events:{onReady:()=>{if(token!==generation)return;ready=true;try{player.mute()}catch(_){}muteButton.textContent='開啟聲音';status.textContent='已載入同步播放器。若未自動播放，請點「播放」。';const p=queued;queued=null;if(p)playback(p)},onError:e=>{status.textContent='此影片可能禁止嵌入播放（YouTube 錯誤碼 '+e.data+'）'}}});
  }).catch(e=>{status.textContent='YouTube 播放器載入失敗';console.error(e)});
 }
-function select(url,label){const id=youtubeID(url);if(!id||!active())return false;if(Date.now()<ignoreSelectUntil&&id===playingID)return true;ignoreSelectUntil=Date.now()+500;show(id,label);transmit({kind:'select',videoID:id,title:label||'YouTube 影片'});return true;}
+function select(url,label){const id=youtubeID(url);if(!id||!active())return false;standaloneDirect=false;if(Date.now()<ignoreSelectUntil&&id===playingID)return true;ignoreSelectUntil=Date.now()+500;show(id,label);transmit({kind:'select',videoID:id,title:label||'YouTube 影片'});return true;}
 // V9: intercept the main page's black 看影片 button at WINDOW capture phase.
 // sync.js listens at document capture phase; window receives the event first.
 // This bypasses its plain YouTube iframe and opens the synchronized controls.
@@ -67,6 +69,7 @@ window.addEventListener('click',e=>{
  if(id!==directVideoID)return;
  e.preventDefault();
  e.stopImmediatePropagation();
+ standaloneDirect=true;
  show(id,'許川川田能久大蛇精');
  transmit({kind:'select',videoID:id,title:'許川川田能久大蛇精'});
 },true);
@@ -83,11 +86,11 @@ setInterval(()=>{
  if(active()&&!documentWatched)bind();
  // Show synchronized controls on both devices when sync.js opens the fixed video.
  if(directActive()){
-  if(!directHandled){directHandled=true;show(directVideoID,'許川川田能久大蛇精');}
+  if(!directHandled){directHandled=true;standaloneDirect=false;show(directVideoID,'許川川田能久大蛇精');}
   return;
  }
  directHandled=false;
- if(!active()&&panel.style.display!=='none')close();
+ if(!active()&&!standaloneDirect&&panel.style.display!=='none')close();
 },250);
 panel.querySelector('#fsvPlay').onclick=()=>{playback('play');transmit({kind:'playback',op:'play'})};
 panel.querySelector('#fsvPause').onclick=()=>{playback('pause');transmit({kind:'playback',op:'pause'})};
@@ -103,7 +106,7 @@ seekBar.onchange=()=>{let duration=0;try{duration=player?.getDuration()||0}catch
 muteButton.onclick=()=>{if(!ready||!player)return;try{if(player.isMuted()){player.unMute();muteButton.textContent='靜音'}else{player.mute();muteButton.textContent='開啟聲音'}}catch(_){}};
 setInterval(()=>{if(panel.style.display==='none'||!ready||!player||seekBar.matches(':active'))return;try{const duration=player.getDuration();if(duration>0)seekBar.value=String(Math.max(0,Math.min(1000,Math.floor(player.getCurrentTime()/duration*1000))))}catch(_){}},600);
 actionRef.on('value',snap=>{const cmd=snap.val();if(!cmd?.id||cmd.id===last||cmd.sender===self)return;last=cmd.id;if(typeof cmd.at==='number'&&cmd.at<began-2000)return;
- remote=true;try{if(cmd.kind==='select'&&/^[\w-]{11}$/.test(cmd.videoID||''))show(cmd.videoID,cmd.title);
+ remote=true;try{if(cmd.kind==='select'&&/^[\w-]{11}$/.test(cmd.videoID||'')){standaloneDirect=cmd.videoID===directVideoID&&!active()&&!directActive();show(cmd.videoID,cmd.title);}
  else if(cmd.kind==='playback'&&['play','pause'].includes(cmd.op))playback(cmd.op);
  else if(cmd.kind==='seek')jump(Number(cmd.seconds));else if(cmd.kind==='close'){const wasDirect=directActive();close();if(wasDirect){directHandled=true;document.getElementById('syncExternalClose')?.click()}}}finally{remote=false}
 },e=>{status.textContent='同步讀取失敗';console.error(e)});
