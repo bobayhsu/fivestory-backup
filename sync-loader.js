@@ -26,8 +26,8 @@
       }
       badge.textContent='同步：啟動連線…';
       await load('sync.js?v=inline9');
-      // Nested bridge connects the interactive Bullseye page inside the same-origin iframe.
       await load('bullseye-sync.js?v=2');
+      await load('video-sync.js?v=1');
       if (badge.textContent==='同步：啟動連線…') badge.textContent='同步程式未啟動，請檢查 sync.js';
     } catch (err) { badge.textContent='同步載入失敗：'+err.message; console.error(err); }
   });
