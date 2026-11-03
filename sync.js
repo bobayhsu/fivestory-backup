@@ -116,7 +116,7 @@ function send(){
  const s=capture(), val=stable(s);
  if(val===latest)return;
  latest=val;
- ref.set({v:1,source:nodeId,at:firebase.database.ServerValue.TIMESTAMP,screen:s}).catch(e=>{badge.textContent='寫入失敗：請檢查資料庫規則';console.error(e);});
+ ref.update({v:1,source:nodeId,at:firebase.database.ServerValue.TIMESTAMP,screen:s}).catch(e=>{badge.textContent='寫入失敗：請檢查資料庫規則';console.error(e);});
 }
 ref.on('value',snap=>{
  const packet=snap.val();
